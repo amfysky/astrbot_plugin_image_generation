@@ -104,6 +104,18 @@ DEFAULT_RATE_LIMIT_SECONDS = 0
 """Default per-user cooldown in seconds; 0 disables cooldown."""
 
 
+# Message interaction settings.
+
+DEFAULT_REPLY_QUOTE_ENABLED = True
+"""Default setting for quoting the triggering message when delivering results."""
+
+DEFAULT_PROGRESS_REACTION_ENABLED = True
+"""Default setting for the in-progress emoji reaction."""
+
+DEFAULT_PROGRESS_REACTION_EMOJI_IDS = (66,)
+"""Default aiocqhttp emoji ids applied while a generation task is running."""
+
+
 # LLM tool switches.
 
 LLM_TOOL_IMAGE_GENERATION = "生图工具"

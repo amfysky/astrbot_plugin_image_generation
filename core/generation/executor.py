@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
@@ -18,6 +19,7 @@ from ..formatting.result import (
     format_generation_failure_message,
 )
 from ..audit.safety import SafetyAuditor
+from ..messaging.interaction import prepend_reply
 from ..tasks.ids import new_task_id
 from ..tasks.manager import TaskManager
 from ..shared.types import GenerationRequest, ImageCapability, ImageData
@@ -85,6 +87,7 @@ class GenerationExecutor:
         is_usage_limit_admin: bool = False,
         deliver_via_ai: bool = False,
         auto_send: bool = True,
+        reply_message_id: Any = None,
     ) -> None:
         """Generate images and optionally send them to the user.
 
@@ -99,6 +102,8 @@ class GenerationExecutor:
             is_usage_limit_admin: Whether usage limits are bypassed for display.
             deliver_via_ai: Whether results are handed back to the AI tool flow.
             auto_send: Whether to send generated images to the user directly.
+            reply_message_id: Optional triggering message id to quote when
+                delivering results directly to the user.
         """
         if not self.generator or not self.generator.adapter:
             if task_id:
@@ -178,6 +183,7 @@ class GenerationExecutor:
                 is_usage_limit_admin,
                 deliver_via_ai,
                 auto_send,
+                reply_message_id,
             )
         except (asyncio.CancelledError, Exception):
             self.release_generation_task_quota_once(task_id)
@@ -239,6 +245,7 @@ class GenerationExecutor:
         is_usage_limit_admin: bool,
         deliver_via_ai: bool = False,
         auto_send: bool = True,
+        reply_message_id: Any = None,
     ) -> None:
         """Execute generation logic and deliver results."""
         start_time = time.time()
@@ -275,7 +282,10 @@ class GenerationExecutor:
                 return
             await self.context.send_message(
                 unified_msg_origin,
-                MessageChain().message(format_generation_failure_message(error)),
+                self._build_text_chain(
+                    format_generation_failure_message(error),
+                    reply_message_id,
+                ),
             )
             return
 
@@ -302,7 +312,10 @@ class GenerationExecutor:
                 return
             await self.context.send_message(
                 unified_msg_origin,
-                MessageChain().message(f"❌ 图片内容审核未通过: {image_reason}"),
+                self._build_text_chain(
+                    f"❌ 图片内容审核未通过: {image_reason}",
+                    reply_message_id,
+                ),
             )
             return
 
@@ -338,6 +351,7 @@ class GenerationExecutor:
             unified_msg_origin,
             generated_file_paths,
             info_message=info_message,
+            reply_message_id=reply_message_id,
         )
         if send_errors:
             delivery_message = (
@@ -356,12 +370,19 @@ class GenerationExecutor:
             message=delivery_message,
         )
 
+    def _build_text_chain(self, text: str, reply_message_id: Any = None) -> MessageChain:
+        """Build a plain-text message chain, optionally quoting a message."""
+        chain = MessageChain().message(text)
+        prepend_reply(chain, reply_message_id)
+        return chain
+
     async def _send_generated_images(
         self,
         unified_msg_origin: str,
         image_paths: list[str],
         *,
         info_message: str = "",
+        reply_message_id: Any = None,
     ) -> tuple[int, list[str]]:
         """Send generated images in configured batches."""
         max_per_message = max(1, self.config_manager.max_images_per_message)
@@ -377,6 +398,10 @@ class GenerationExecutor:
             is_last_batch = start + max_per_message >= total
             if is_last_batch and info_message:
                 chain.message("\n" + info_message)
+
+            # Quote the triggering message on the first batch only.
+            if start == 0:
+                prepend_reply(chain, reply_message_id)
 
             batch_index = start // max_per_message + 1
             try:

@@ -98,6 +98,22 @@
       "result_info_items": {
         "labels": ["耗时", "模型", "生成数量", "用量", "任务ID"]
       }
+    },
+    "message_interaction": {
+      "description": "消息互动",
+      "hint": "配置生图结果的引用回复和生图期间的进度表情反应。",
+      "reply_quote_enabled": {
+        "description": "引用触发消息回复",
+        "hint": "开启后生图结果会引用触发生图的原始消息回复，涵盖 /生图 指令直接发送以及 AI 唤醒交付（send_message_to_user）两种方式。"
+      },
+      "progress_reaction_enabled": {
+        "description": "生图进度表情反应",
+        "hint": "开启后，生图进行中会给触发消息贴上表情表示“生成中”，任务结束后自动移除。仅 aiocqhttp（QQ，如 NapCat/Lagrange）协议端支持。"
+      },
+      "progress_reaction_emoji_ids": {
+        "description": "进度表情 ID 列表",
+        "hint": "生图进行中贴上的 QQ 表情 ID，可配置多个。表情 ID 可参考 OneBot/NapCat 表情对照表，默认 66（爱心）；如需停用请关闭上方开关。"
+      }
     }
   }
 }

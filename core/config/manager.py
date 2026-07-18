@@ -11,6 +11,7 @@ from .validator import ConfigValidator
 from .models import (
     GenerationSettings,
     ImageAuditSettings,
+    MessageInteractionSettings,
     PersonaTemplate,
     PluginConfig,
     PromptAuditSettings,
@@ -37,7 +38,10 @@ from ..shared.constants import (
     DEFAULT_MAX_RUNNING_GENERATION_TASKS,
     DEFAULT_NON_RETRYABLE_ERROR_KEYWORDS,
     DEFAULT_NON_RETRYABLE_STATUS_CODES,
+    DEFAULT_PROGRESS_REACTION_EMOJI_IDS,
+    DEFAULT_PROGRESS_REACTION_ENABLED,
     DEFAULT_RATE_LIMIT_SECONDS,
+    DEFAULT_REPLY_QUOTE_ENABLED,
     DEFAULT_RESOLUTION,
     DEFAULT_RESULT_INFO_ITEMS,
     LLM_TOOL_IMAGE_GENERATION,
@@ -61,6 +65,7 @@ __all__ = (
     "LLM_TOOL_PRESET_EDIT",
     "LLM_TOOL_PRESET_QUERY",
     "LLM_TOOL_TASK_MANAGEMENT",
+    "MessageInteractionSettings",
     "PersonaTemplate",
     "PluginConfig",
     "PromptAuditSettings",
@@ -97,6 +102,7 @@ class ConfigManager(ConfigProviderParserMixin, ConfigTemplateStoreMixin):
         generation_runtime_cfg = self._get_config_section("generation_runtime")
         user_limits_cfg = self._get_config_section("user_limits")
         safety_cfg = self._get_config_section("safety_audit")
+        message_interaction_cfg = self._get_config_section("message_interaction")
         prompt_templates_cfg = self._get_config_section("prompt_templates")
         generation_task_history_cfg = self._get_config_section(
             "generation_task_history"
@@ -124,6 +130,9 @@ class ConfigManager(ConfigProviderParserMixin, ConfigTemplateStoreMixin):
                 generation_task_history_cfg,
             ),
             safety_audit_settings=self._parse_safety_audit_settings(safety_cfg),
+            message_interaction_settings=self._parse_message_interaction_settings(
+                message_interaction_cfg
+            ),
             presets=self._load_presets(prompt_templates_cfg.get("presets", [])),
             personas=self._load_personas(prompt_templates_cfg.get("personas", [])),
             enabled_llm_tools=set(
@@ -320,6 +329,30 @@ class ConfigManager(ConfigProviderParserMixin, ConfigTemplateStoreMixin):
                 min_value=1,
             ),
             ai_prompt=self._get_str(cfg, "ai_prompt", ImageAuditSettings.ai_prompt),
+        )
+
+    def _parse_message_interaction_settings(
+        self, cfg: dict[str, Any]
+    ) -> MessageInteractionSettings:
+        """Parse reply quoting and progress emoji reaction settings."""
+        return MessageInteractionSettings(
+            reply_quote_enabled=self._get_bool(
+                cfg,
+                "reply_quote_enabled",
+                DEFAULT_REPLY_QUOTE_ENABLED,
+            ),
+            progress_reaction_enabled=self._get_bool(
+                cfg,
+                "progress_reaction_enabled",
+                DEFAULT_PROGRESS_REACTION_ENABLED,
+            ),
+            progress_reaction_emoji_ids=self._parse_int_list(
+                cfg.get(
+                    "progress_reaction_emoji_ids",
+                    list(DEFAULT_PROGRESS_REACTION_EMOJI_IDS),
+                ),
+                list(DEFAULT_PROGRESS_REACTION_EMOJI_IDS),
+            ),
         )
 
     def reload(self) -> PluginConfig:
@@ -554,6 +587,30 @@ class ConfigManager(ConfigProviderParserMixin, ConfigTemplateStoreMixin):
     def safety_audit_settings(self) -> SafetyAuditSettings:
         """Return safety audit settings."""
         return self._plugin_config.safety_audit_settings
+
+    @property
+    def message_interaction_settings(self) -> MessageInteractionSettings:
+        """Return reply quoting and progress emoji reaction settings."""
+        return self._plugin_config.message_interaction_settings
+
+    @property
+    def reply_quote_enabled(self) -> bool:
+        """Return whether generated results quote the triggering message."""
+        return self._plugin_config.message_interaction_settings.reply_quote_enabled
+
+    @property
+    def progress_reaction_enabled(self) -> bool:
+        """Return whether the in-progress emoji reaction is enabled."""
+        return (
+            self._plugin_config.message_interaction_settings.progress_reaction_enabled
+        )
+
+    @property
+    def progress_reaction_emoji_ids(self) -> list[int]:
+        """Return emoji ids applied while a generation task is running."""
+        return list(
+            self._plugin_config.message_interaction_settings.progress_reaction_emoji_ids
+        )
 
     # Provider lookup helpers.
     def get_provider_config(self, adapter_type: AdapterType) -> AdapterConfig | None:

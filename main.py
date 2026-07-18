@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +45,7 @@ from .core.shared.logging import (
 )
 from .core.api.public import ImageGenerationPublicAPI
 from .core.generation.reference_collector import collect_command_reference_images
+from .core.messaging.interaction import EmojiReaction, get_reply_message_id
 from .core.formatting.result import (
     format_image_command_help as render_image_command_help,
 )
@@ -336,18 +337,33 @@ class ImageGenerationPlugin(Star):
             )
         image_count = self.normalize_image_count(image_count)
 
+        reply_message_id = None
+        if source_event is not None and self.config_manager.reply_quote_enabled:
+            reply_message_id = get_reply_message_id(source_event)
+
+        progress_reaction: EmojiReaction | None = None
+        if source_event is not None and self.config_manager.progress_reaction_enabled:
+            progress_reaction = EmojiReaction.from_event(
+                source_event,
+                self.config_manager.progress_reaction_emoji_ids,
+            )
+
         def _generation_coro_factory():
-            return self.generation_executor.generate_and_send_image_async(
-                prompt=prompt,
-                images_data=images_data or None,
-                unified_msg_origin=unified_msg_origin,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                image_count=image_count,
-                task_id=task_id,
-                is_usage_limit_admin=is_usage_limit_admin,
-                deliver_via_ai=source == "LLM工具",
-                auto_send=auto_send,
+            return self._run_generation_with_reaction(
+                progress_reaction,
+                lambda: self.generation_executor.generate_and_send_image_async(
+                    prompt=prompt,
+                    images_data=images_data or None,
+                    unified_msg_origin=unified_msg_origin,
+                    aspect_ratio=aspect_ratio,
+                    resolution=resolution,
+                    image_count=image_count,
+                    task_id=task_id,
+                    is_usage_limit_admin=is_usage_limit_admin,
+                    deliver_via_ai=source == "LLM工具",
+                    auto_send=auto_send,
+                    reply_message_id=reply_message_id,
+                ),
             )
 
         try:
@@ -375,12 +391,32 @@ class ImageGenerationPlugin(Star):
                 count=image_count,
             )
             raise
+        if progress_reaction is not None:
+            self.task_manager.add_generation_task_done_callback(
+                record.task_id,
+                lambda _record, _reaction=progress_reaction: _reaction.remove(),
+            )
         if source == "LLM工具":
             self.llm_result_handler.attach_task_wakeup(
                 record,
                 source_event=source_event,
             )
         return record
+
+    async def _run_generation_with_reaction(
+        self,
+        reaction: EmojiReaction | None,
+        generation_coro_factory: Callable[[], Coroutine[Any, Any, Any]],
+    ) -> None:
+        """Add the in-progress emoji reaction, then run the generation coroutine.
+
+        The reaction is added once the task starts running so it reflects active
+        generation. Removal is handled by a terminal done callback, which always
+        runs after this coroutine completes, so add always precedes remove.
+        """
+        if reaction is not None:
+            await reaction.add()
+        await generation_coro_factory()
 
     def _handle_generation_task_terminal(self, record: GenerationTaskRecord) -> None:
         """Handle quota side effects when a task reaches terminal state.
@@ -781,6 +817,7 @@ class ImageGenerationPlugin(Star):
                     preset_label=preset_label,
                     presets=matched_presets,
                     personas=matched_personas,
+                    source_event=event,
                 )
                 task_created = True
             except GenerationTaskCreationError:

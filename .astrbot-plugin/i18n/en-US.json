@@ -619,6 +619,22 @@
         }
       }
     },
+    "message_interaction": {
+      "description": "Message interaction",
+      "hint": "Configure reply quoting for generation results and the in-progress emoji reaction.",
+      "reply_quote_enabled": {
+        "description": "Quote the triggering message",
+        "hint": "When enabled, generation results quote the original triggering message — both those sent directly by the /生图 command and those delivered by the AI wake turn (send_message_to_user)."
+      },
+      "progress_reaction_enabled": {
+        "description": "Progress emoji reaction",
+        "hint": "When enabled, an emoji reaction is added to the triggering message while generation is in progress and removed once the task finishes. Supported only on aiocqhttp (QQ, e.g. NapCat/Lagrange) protocols."
+      },
+      "progress_reaction_emoji_ids": {
+        "description": "Progress emoji id list",
+        "hint": "QQ emoji ids added while generation is in progress. Multiple ids are supported. See the OneBot/NapCat emoji reference. Default is 66 (heart); turn off the toggle above to disable reactions."
+      }
+    },
     "prompt_templates": {
       "description": "Prompt templates",
       "hint": "Centrally configure preset prompts and persona templates. View them with /预设 and use them by name with /生图.",

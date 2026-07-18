@@ -21,6 +21,8 @@ from astrbot.core.utils.history_saver import persist_agent_history
 
 from ..config.manager import ConfigManager
 from ..formatting.result import format_generation_failure_message
+from ..messaging.interaction import prepend_reply
+from ..messaging.quoting_tool import QuotingSendMessageToUserTool
 from ..tasks.models import GenerationTaskRecord, GenerationTaskStatus
 from ..shared.logging import log_prefix, safe_log_text
 from ..tasks.manager import TaskManager
@@ -194,15 +196,41 @@ class LLMResultHandler:
             payload["duration_seconds"] = round(record.duration_seconds, 2)
         return payload
 
-    def _build_fallback_chain(self, record: GenerationTaskRecord) -> MessageChain:
+    def _resolve_reply_message_id(
+        self, source_event: AstrMessageEvent | None
+    ) -> Any | None:
+        """Return the id of the user's triggering message to quote, if enabled.
+
+        Args:
+            source_event: The user event that originally triggered generation.
+
+        Returns:
+            The real message id, or ``None`` when quoting is disabled or the id is
+            unavailable.
+        """
+        if source_event is None or not self.config_manager.reply_quote_enabled:
+            return None
+        try:
+            return source_event.message_obj.message_id or None
+        except Exception:
+            return None
+
+    def _build_fallback_chain(
+        self,
+        record: GenerationTaskRecord,
+        *,
+        reply_message_id: Any = None,
+    ) -> MessageChain:
         """Build a direct user-facing fallback message when AI handling fails."""
         chain = MessageChain()
         if record.error:
             chain.message(format_generation_failure_message(record.error))
+            prepend_reply(chain, reply_message_id)
             return chain
 
         if not record.result_paths:
             chain.message("❌ 生成失败: 未能获取生成图片")
+            prepend_reply(chain, reply_message_id)
             return chain
 
         for file_path in record.result_paths:
@@ -211,6 +239,7 @@ class LLMResultHandler:
         if record.result_count:
             info_parts.append(f"🖼️ 数量: {record.result_count}张")
         chain.message("\n" + "\n".join(info_parts))
+        prepend_reply(chain, reply_message_id)
         return chain
 
     async def _send_fallback(
@@ -218,6 +247,7 @@ class LLMResultHandler:
         record: GenerationTaskRecord,
         *,
         reason: str,
+        source_event: AstrMessageEvent | None = None,
     ) -> None:
         """Directly send task result if the awakened AI cannot handle it."""
         logger.warning(
@@ -225,7 +255,34 @@ class LLMResultHandler:
         )
         await self.context.send_message(
             record.unified_msg_origin,
-            self._build_fallback_chain(record),
+            self._build_fallback_chain(
+                record,
+                reply_message_id=self._resolve_reply_message_id(source_event),
+            ),
+        )
+
+    def _build_delivery_tool(self, source_event: AstrMessageEvent):
+        """Build the wake-turn delivery tool, quoting the source message if enabled.
+
+        Falls back to the unmodified builtin ``send_message_to_user`` when reply
+        quoting is disabled or the source message id is unavailable, keeping the
+        original delivery behavior byte-for-byte.
+
+        Args:
+            source_event: The user event that originally triggered generation.
+
+        Returns:
+            A delivery tool to mount on the proactive wake turn.
+        """
+        builtin_tool = self.context.get_llm_tool_manager().get_builtin_tool(
+            SendMessageToUserTool
+        )
+        reply_message_id = self._resolve_reply_message_id(source_event)
+        if not reply_message_id:
+            return builtin_tool
+        return QuotingSendMessageToUserTool.build(
+            reply_message_id=reply_message_id,
+            base_parameters=getattr(builtin_tool, "parameters", None),
         )
 
     async def wake_ai_for_generation_task_result(
@@ -245,6 +302,8 @@ class LLMResultHandler:
             logger.debug(f"{log_prefix('Task', task_id)} 生图任务已取消，不唤醒 AI")
             return
         if record.unified_msg_origin != source_event.unified_msg_origin:
+            # Do not quote here: the result goes to a different session than the
+            # source event, so its message id would not resolve in the target.
             await self._send_fallback(
                 record,
                 reason="任务会话与来源事件不一致",
@@ -261,7 +320,9 @@ class LLMResultHandler:
                 f"{log_prefix('Task', task_id)} 唤醒 AI 处理生图结果异常: {exc}",
                 exc_info=True,
             )
-            await self._send_fallback(record, reason=str(exc))
+            await self._send_fallback(
+                record, reason=str(exc), source_event=source_event
+            )
 
     async def _run_generation_result_agent(
         self,
@@ -350,10 +411,13 @@ class LLMResultHandler:
                     TextPart(text=f"[Generated image path: {path}]")
                 )
 
+        # Deliver via a tool that quotes the user's original triggering message.
+        # The wake turn runs on a synthetic CronMessageEvent whose message_id is a
+        # random uuid, so the real id must come from source_event.
+        delivery_tool = self._build_delivery_tool(source_event)
+
         req.func_tool = ToolSet()
-        req.func_tool.add_tool(
-            self.context.get_llm_tool_manager().get_builtin_tool(SendMessageToUserTool)
-        )
+        req.func_tool.add_tool(delivery_tool)
 
         config = MainAgentBuildConfig(
             tool_call_timeout=tool_call_timeout,
@@ -372,15 +436,15 @@ class LLMResultHandler:
             apply_reset=False,
         )
         if not result:
-            await self._send_fallback(record, reason="无法构建主 Agent")
+            await self._send_fallback(
+                record, reason="无法构建主 Agent", source_event=source_event
+            )
             return
 
         # build_main_agent merges default tools from persona/plugin settings.
         # Trim tools before reset so this proactive turn can only deliver results.
         result.provider_request.func_tool = ToolSet()
-        result.provider_request.func_tool.add_tool(
-            self.context.get_llm_tool_manager().get_builtin_tool(SendMessageToUserTool)
-        )
+        result.provider_request.func_tool.add_tool(delivery_tool)
         if result.reset_coro:
             await result.reset_coro
 
@@ -402,6 +466,7 @@ class LLMResultHandler:
             await self._send_fallback(
                 record,
                 reason="AI 未通过 send_message_to_user 发送结果",
+                source_event=source_event,
             )
 
         summary_note = (

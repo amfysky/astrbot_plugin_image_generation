@@ -45,6 +45,8 @@ MIN_NUMBER_VALUES: dict[str, int | float] = {
     "user_limits.daily_limit_count": 1,
     "safety_audit.prompt_audit.max_retry_attempts": 1,
     "safety_audit.image_audit.max_retry_attempts": 1,
+    "message_interaction.progress_reaction_emoji_ids": 0,
+    "message_interaction.progress_reaction_emoji_ids.*": 0,
 }
 
 

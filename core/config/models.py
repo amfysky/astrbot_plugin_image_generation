@@ -23,8 +23,11 @@ from ..shared.constants import (
     DEFAULT_MAX_RUNNING_GENERATION_TASKS,
     DEFAULT_NON_RETRYABLE_ERROR_KEYWORDS,
     DEFAULT_NON_RETRYABLE_STATUS_CODES,
+    DEFAULT_PROGRESS_REACTION_EMOJI_IDS,
+    DEFAULT_PROGRESS_REACTION_ENABLED,
     DEFAULT_PROMPT_AUDIT_PROMPT,
     DEFAULT_RATE_LIMIT_SECONDS,
+    DEFAULT_REPLY_QUOTE_ENABLED,
     DEFAULT_RESOLUTION,
     DEFAULT_RESULT_INFO_ITEMS,
 )
@@ -77,6 +80,17 @@ class GenerationSettings:
 
 
 @dataclass
+class MessageInteractionSettings:
+    """Reply quoting and progress emoji reaction settings."""
+
+    reply_quote_enabled: bool = DEFAULT_REPLY_QUOTE_ENABLED
+    progress_reaction_enabled: bool = DEFAULT_PROGRESS_REACTION_ENABLED
+    progress_reaction_emoji_ids: list[int] = field(
+        default_factory=lambda: list(DEFAULT_PROGRESS_REACTION_EMOJI_IDS)
+    )
+
+
+@dataclass
 class PersonaTemplate:
     """Image generation persona template."""
 
@@ -125,6 +139,9 @@ class PluginConfig:
     safety_audit_settings: SafetyAuditSettings = field(
         default_factory=SafetyAuditSettings
     )
+    message_interaction_settings: MessageInteractionSettings = field(
+        default_factory=MessageInteractionSettings
+    )
     presets: dict[str, Any] = field(default_factory=dict)
     personas: dict[str, PersonaTemplate] = field(default_factory=dict)
     enabled_llm_tools: set[str] = field(default_factory=lambda: set(ALL_LLM_TOOLS))
@@ -133,6 +150,7 @@ class PluginConfig:
 __all__ = (
     "GenerationSettings",
     "ImageAuditSettings",
+    "MessageInteractionSettings",
     "PersonaTemplate",
     "PluginConfig",
     "PromptAuditSettings",
