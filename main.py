@@ -11,6 +11,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.config.astrbot_config import AstrBotConfig
+from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.star.star_tools import StarTools
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
@@ -44,6 +45,7 @@ from .core.shared.logging import (
     safe_log_text,
 )
 from .core.api.public import ImageGenerationPublicAPI
+from .core.generation.context_images import format_context_handle_hint
 from .core.generation.reference_collector import collect_command_reference_images
 from .core.messaging.interaction import EmojiReaction, get_reply_message_id
 from .core.formatting.result import (
@@ -611,6 +613,52 @@ class ImageGenerationPlugin(Star):
             task_ref,
             include_finished=False,
         )
+
+    # LLM request hooks.
+
+    def _supports_image_to_image(self) -> bool:
+        """Return whether the active image adapter accepts reference images."""
+        if not self.generator or not self.generator.adapter:
+            return False
+        capabilities = self.generator.adapter.get_capabilities()
+        return bool(capabilities & ImageCapability.IMAGE_TO_IMAGE)
+
+    @filter.on_llm_request()
+    async def inject_context_image_handles(
+        self,
+        event: AstrMessageEvent,
+        req: ProviderRequest,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Expose the message's images to the chat model as text handles.
+
+        A text-only provider never receives the image bytes, so on its own it
+        can never ask for "the picture the user just sent". Injecting handles
+        keeps the bytes out of the model context while still letting it request
+        image-to-image generation through ``generate_image``.
+
+        ``*args``/``**kwargs`` absorb the extra hook arguments newer AstrBot
+        versions pass after ``req``.
+        """
+        if not self.config_manager.context_handle_prompt_enabled:
+            return
+        if not self.config_manager.is_llm_tool_enabled(LLM_TOOL_IMAGE_GENERATION):
+            return
+        if not self._supports_image_to_image():
+            return
+
+        try:
+            index = self.image_processor.scan_event_image_sources(event)
+            hint = format_context_handle_hint(index)
+        except Exception as exc:
+            logger.debug(f"{LOG} 构建图片句柄提示失败: {safe_log_error_body(exc)}")
+            return
+
+        if not hint:
+            return
+        req.system_prompt = f"{req.system_prompt or ''}\n\n{hint}".strip()
+        logger.debug(f"{LOG} 已注入 {len(index.sources)} 个图片句柄提示")
 
     # Command handlers.
 

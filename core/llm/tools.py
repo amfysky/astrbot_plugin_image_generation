@@ -251,6 +251,7 @@ async def _start_generation_task(
                 avatar_references=avatar_references,
                 persona_images=persona_images,
                 task_id=task_id,
+                auto_context_reference=plugin.config_manager.auto_context_reference_enabled,
             )
         except Exception as exc:
             logger.error(
@@ -365,12 +366,18 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
                 },
                 "avatar_references": {
                     "type": "array",
-                    "description": "可选。需要使用头像作为参考图时填写，'self' 表示机器人，'sender' 表示发送者，也可填写 QQ 号/用户 ID。",
+                    "description": "可选。需要使用头像作为参考图时填写，'self' 表示机器人，'sender' 表示发送者，也可填写 QQ 号/用户 ID；消息文本中出现 '@昵称(QQ号)' 时填写括号里的号码。",
                     "items": {"type": "string"},
                 },
                 "reference_images": {
                     "type": "array",
-                    "description": "可选。参考图列表，支持 http(s) 网络图片 URL；本地图片仅允许当前会话 workspace和AstrBot temp 目录。",
+                    "description": (
+                        "可选。参考图列表，需要在已有图片基础上改图、换风格、二次创作时填写。"
+                        "支持三类值：① 图片句柄 'message:1'（用户本条消息的第 1 张图）、"
+                        "'reply:1'（被引用消息的第 1 张图）、'avatar:QQ号'；"
+                        "消息中的图片不会出现在你的上下文里，按提示中给出的句柄原样填写即可。"
+                        "② http(s) 网络图片 URL。③ 本地图片路径，仅允许当前会话 workspace 和 AstrBot temp 目录。"
+                    ),
                     "items": {"type": "string"},
                 },
             },

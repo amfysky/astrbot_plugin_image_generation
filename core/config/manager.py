@@ -11,6 +11,7 @@ from .validator import ConfigValidator
 from .models import (
     GenerationSettings,
     ImageAuditSettings,
+    LLMToolReferenceSettings,
     MessageInteractionSettings,
     PersonaTemplate,
     PluginConfig,
@@ -25,6 +26,8 @@ from ..shared.constants import (
     ALL_RESULT_INFO_ITEMS,
     DEFAULT_ASPECT_RATIO,
     DEFAULT_AUDIT_MAX_RETRY_ATTEMPTS,
+    DEFAULT_AUTO_CONTEXT_REFERENCE_ENABLED,
+    DEFAULT_CONTEXT_HANDLE_PROMPT_ENABLED,
     DEFAULT_DAILY_LIMIT_COUNT,
     DEFAULT_ENABLE_GENERATION_TASK_HISTORY,
     DEFAULT_GENERATION_IMAGE_COUNT,
@@ -61,6 +64,7 @@ __all__ = (
     "ConfigManager",
     "GenerationSettings",
     "ImageAuditSettings",
+    "LLMToolReferenceSettings",
     "LLM_TOOL_IMAGE_GENERATION",
     "LLM_TOOL_PRESET_EDIT",
     "LLM_TOOL_PRESET_QUERY",
@@ -103,6 +107,7 @@ class ConfigManager(ConfigProviderParserMixin, ConfigTemplateStoreMixin):
         user_limits_cfg = self._get_config_section("user_limits")
         safety_cfg = self._get_config_section("safety_audit")
         message_interaction_cfg = self._get_config_section("message_interaction")
+        llm_tool_reference_cfg = self._get_config_section("llm_tool_reference")
         prompt_templates_cfg = self._get_config_section("prompt_templates")
         generation_task_history_cfg = self._get_config_section(
             "generation_task_history"
@@ -132,6 +137,9 @@ class ConfigManager(ConfigProviderParserMixin, ConfigTemplateStoreMixin):
             safety_audit_settings=self._parse_safety_audit_settings(safety_cfg),
             message_interaction_settings=self._parse_message_interaction_settings(
                 message_interaction_cfg
+            ),
+            llm_tool_reference_settings=self._parse_llm_tool_reference_settings(
+                llm_tool_reference_cfg
             ),
             presets=self._load_presets(prompt_templates_cfg.get("presets", [])),
             personas=self._load_personas(prompt_templates_cfg.get("personas", [])),
@@ -352,6 +360,23 @@ class ConfigManager(ConfigProviderParserMixin, ConfigTemplateStoreMixin):
                     list(DEFAULT_PROGRESS_REACTION_EMOJI_IDS),
                 ),
                 list(DEFAULT_PROGRESS_REACTION_EMOJI_IDS),
+            ),
+        )
+
+    def _parse_llm_tool_reference_settings(
+        self, cfg: dict[str, Any]
+    ) -> LLMToolReferenceSettings:
+        """Parse LLM tool reference image sourcing settings."""
+        return LLMToolReferenceSettings(
+            context_handle_prompt_enabled=self._get_bool(
+                cfg,
+                "context_handle_prompt_enabled",
+                DEFAULT_CONTEXT_HANDLE_PROMPT_ENABLED,
+            ),
+            auto_context_reference_enabled=self._get_bool(
+                cfg,
+                "auto_context_reference_enabled",
+                DEFAULT_AUTO_CONTEXT_REFERENCE_ENABLED,
             ),
         )
 
@@ -611,6 +636,21 @@ class ConfigManager(ConfigProviderParserMixin, ConfigTemplateStoreMixin):
         return list(
             self._plugin_config.message_interaction_settings.progress_reaction_emoji_ids
         )
+
+    @property
+    def llm_tool_reference_settings(self) -> LLMToolReferenceSettings:
+        """Return LLM tool reference image sourcing settings."""
+        return self._plugin_config.llm_tool_reference_settings
+
+    @property
+    def context_handle_prompt_enabled(self) -> bool:
+        """Return whether message image handles are injected into LLM requests."""
+        return self._plugin_config.llm_tool_reference_settings.context_handle_prompt_enabled
+
+    @property
+    def auto_context_reference_enabled(self) -> bool:
+        """Return whether message images are used when the tool gets no reference."""
+        return self._plugin_config.llm_tool_reference_settings.auto_context_reference_enabled
 
     # Provider lookup helpers.
     def get_provider_config(self, adapter_type: AdapterType) -> AdapterConfig | None:

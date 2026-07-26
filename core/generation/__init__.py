@@ -1,5 +1,11 @@
 """Image generation execution package."""
 
+from .context_images import (
+    EventImageIndex,
+    ImageSource,
+    format_context_handle_hint,
+    resolve_context_references,
+)
 from .image_processor import ImageProcessor
 from .image_utils import (
     convert_image_format,
@@ -29,8 +35,10 @@ def __getattr__(name: str):
 
 
 __all__ = (
+    "EventImageIndex",
     "GenerationExecutor",
     "ImageProcessor",
+    "ImageSource",
     "collect_command_reference_images",
     "collect_reference_images_from_personas",
     "collect_tool_reference_images",
@@ -40,7 +48,9 @@ __all__ = (
     "detect_mime_type",
     "download_reference_images",
     "ensure_image_data",
+    "format_context_handle_hint",
     "normalize_string_items",
+    "resolve_context_references",
     "validate_aspect_ratio",
     "validate_resolution",
 )

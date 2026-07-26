@@ -1451,6 +1451,25 @@
       }
     }
   },
+  "llm_tool_reference": {
+    "description": "LLM 工具参考图",
+    "hint": "控制 LLM 生图工具如何拿到当前消息里的图片。非多模态（纯文本）模型看不到消息图片，只能通过这里的句柄机制进行图生图。",
+    "type": "object",
+    "items": {
+      "context_handle_prompt_enabled": {
+        "description": "注入图片句柄提示",
+        "hint": "开启后，消息中存在图片、引用图片或 @ 用户时，会在 LLM 请求的系统提示里追加一段纯文本句柄清单（message:1、reply:1、avatar:QQ号）。图片本身不会进入模型上下文，模型只需把句柄填进 generate_image 的 reference_images/avatar_references，纯文本模型也能进行图生图。",
+        "type": "bool",
+        "default": true
+      },
+      "auto_context_reference_enabled": {
+        "description": "未指定参考图时自动引用",
+        "hint": "开启后，LLM 调用生图工具且没有填写任何参考图、头像和人设参数时，自动使用当前消息图片、引用消息图片和 @ 用户头像作为参考图。关闭后必须由模型显式填写句柄。",
+        "type": "bool",
+        "default": true
+      }
+    }
+  },
   "prompt_templates": {
     "description": "提示词模板",
     "hint": "集中配置预设提示词和人设模板；可通过 /预设 查看，通过 /生图 按名称使用。",

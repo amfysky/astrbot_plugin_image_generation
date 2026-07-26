@@ -27,6 +27,13 @@ from ..shared.logging import (
     safe_log_url,
 )
 from ..shared.types import ImageData
+from .context_images import (
+    HANDLE_AVATAR,
+    HANDLE_MESSAGE,
+    HANDLE_REPLY,
+    EventImageIndex,
+    ImageSource,
+)
 
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
@@ -372,72 +379,91 @@ class ImageProcessor:
 
         return str(leading_component.qq).strip() == bot_self_id
 
-    async def fetch_images_from_event(
-        self,
-        event: AstrMessageEvent,
-        avatar_user_ids: set[str] | None = None,
-    ) -> list[ImageData]:
-        """Extract direct, replied, and mentioned-user images from an event."""
-        images_data: list[ImageData] = []
-        if avatar_user_ids is None:
-            avatar_user_ids = set()
+    def scan_event_image_sources(self, event: AstrMessageEvent) -> EventImageIndex:
+        """Index every image reachable from an event without fetching anything.
 
+        The result records *where* each image comes from, so it can be rendered
+        as text handles for chat models that cannot receive images at all. See
+        :mod:`core.generation.context_images`.
+        """
+        index = EventImageIndex()
         if not event.message_obj or not event.message_obj.message:
-            return images_data
+            return index
 
-        workspace_dir = self.workspace_dir_for_origin(
-            getattr(event, "unified_msg_origin", None)
-        )
         bot_self_id = str(event.get_self_id()) if hasattr(event, "get_self_id") else ""
         should_skip_leading_bot_at = self._should_skip_leading_bot_at(
             event,
             bot_self_id,
         )
         leading_bot_at_skipped = False
+        seen_user_ids: set[str] = set()
 
         for component in event.message_obj.message:
+            if isinstance(component, Comp.Image):
+                # Handle directly sent images.
+                if url := (component.url or component.file):
+                    index.sources.append(ImageSource(kind=HANDLE_MESSAGE, value=url))
+            elif isinstance(component, Comp.Reply):
+                # Handle images inside replied messages.
+                for sub_comp in component.chain or []:
+                    if not isinstance(sub_comp, Comp.Image):
+                        continue
+                    if url := (sub_comp.url or sub_comp.file):
+                        index.sources.append(ImageSource(kind=HANDLE_REPLY, value=url))
+            elif isinstance(component, Comp.At):
+                # Handle mentioned-user avatars.
+                uid = str(getattr(component, "qq", "") or "").strip()
+                if not uid or uid == "all":
+                    continue
+                if (
+                    should_skip_leading_bot_at
+                    and not leading_bot_at_skipped
+                    and uid == bot_self_id
+                ):
+                    leading_bot_at_skipped = True
+                    continue
+                if uid in seen_user_ids:
+                    continue
+                seen_user_ids.add(uid)
+                index.sources.append(
+                    ImageSource(
+                        kind=HANDLE_AVATAR,
+                        value=uid,
+                        label=str(getattr(component, "name", "") or "").strip(),
+                    )
+                )
+        return index
+
+    async def fetch_indexed_images(
+        self,
+        event: AstrMessageEvent,
+        index: EventImageIndex,
+        *,
+        avatar_user_ids: set[str] | None = None,
+    ) -> list[ImageData]:
+        """Download every image recorded in an event image index."""
+        images_data: list[ImageData] = []
+        if avatar_user_ids is None:
+            avatar_user_ids = set()
+
+        workspace_dir = self.workspace_dir_for_origin(
+            getattr(event, "unified_msg_origin", None)
+        )
+        for source in index.sources:
             try:
-                if isinstance(component, Comp.Image):
-                    # Handle directly sent images.
-                    url = component.url or component.file
-                    if url and (
-                        data := await self.download_image(
-                            url,
-                            workspace_dir=workspace_dir,
+                if source.kind == HANDLE_AVATAR:
+                    if source.value in avatar_user_ids:
+                        continue
+                    avatar_user_ids.add(source.value)
+                    if avatar_data := await self.get_avatar(source.value):
+                        images_data.append(
+                            ImageData(data=avatar_data, mime_type="image/jpeg")
                         )
-                    ):
-                        images_data.append(data)
-                elif isinstance(component, Comp.Reply):
-                    # Handle images inside replied messages.
-                    if component.chain:
-                        for sub_comp in component.chain:
-                            if isinstance(sub_comp, Comp.Image):
-                                url = sub_comp.url or sub_comp.file
-                                if url and (
-                                    data := await self.download_image(
-                                        url,
-                                        workspace_dir=workspace_dir,
-                                    )
-                                ):
-                                    images_data.append(data)
-                elif isinstance(component, Comp.At):
-                    # Handle mentioned-user avatars.
-                    if hasattr(component, "qq") and component.qq != "all":
-                        uid = str(component.qq).strip()
-                        if (
-                            should_skip_leading_bot_at
-                            and not leading_bot_at_skipped
-                            and uid == bot_self_id
-                        ):
-                            leading_bot_at_skipped = True
-                            continue
-                        if uid in avatar_user_ids:
-                            continue
-                        avatar_user_ids.add(uid)
-                        if avatar_data := await self.get_avatar(uid):
-                            images_data.append(
-                                ImageData(data=avatar_data, mime_type="image/jpeg")
-                            )
+                elif data := await self.download_image(
+                    source.value,
+                    workspace_dir=workspace_dir,
+                ):
+                    images_data.append(data)
             except Exception as e:
                 logger.error(
                     f"{LOG} 提取消息组件图片失败: {safe_log_error_body(e)}",
@@ -445,6 +471,18 @@ class ImageProcessor:
                 )
                 continue
         return images_data
+
+    async def fetch_images_from_event(
+        self,
+        event: AstrMessageEvent,
+        avatar_user_ids: set[str] | None = None,
+    ) -> list[ImageData]:
+        """Extract direct, replied, and mentioned-user images from an event."""
+        return await self.fetch_indexed_images(
+            event,
+            self.scan_event_image_sources(event),
+            avatar_user_ids=avatar_user_ids,
+        )
 
     def save_generated_image(self, task_id: str, img_bytes: bytes) -> str | None:
         """Save generated image bytes to the temporary directory."""

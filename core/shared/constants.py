@@ -116,6 +116,15 @@ DEFAULT_PROGRESS_REACTION_EMOJI_IDS = (66,)
 """Default aiocqhttp emoji ids applied while a generation task is running."""
 
 
+# LLM tool reference image sourcing.
+
+DEFAULT_CONTEXT_HANDLE_PROMPT_ENABLED = True
+"""Default setting for injecting message image handles into LLM requests."""
+
+DEFAULT_AUTO_CONTEXT_REFERENCE_ENABLED = True
+"""Default setting for auto-referencing message images when the tool gets none."""
+
+
 # LLM tool switches.
 
 LLM_TOOL_IMAGE_GENERATION = "生图工具"

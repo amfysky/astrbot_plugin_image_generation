@@ -9,6 +9,8 @@ from ..shared.constants import (
     ALL_LLM_TOOLS,
     DEFAULT_ASPECT_RATIO,
     DEFAULT_AUDIT_MAX_RETRY_ATTEMPTS,
+    DEFAULT_AUTO_CONTEXT_REFERENCE_ENABLED,
+    DEFAULT_CONTEXT_HANDLE_PROMPT_ENABLED,
     DEFAULT_DAILY_LIMIT_COUNT,
     DEFAULT_ENABLE_GENERATION_TASK_HISTORY,
     DEFAULT_GENERATION_IMAGE_COUNT,
@@ -91,6 +93,18 @@ class MessageInteractionSettings:
 
 
 @dataclass
+class LLMToolReferenceSettings:
+    """How the LLM generation tool sources reference images.
+
+    Chat models without image input cannot see the pictures in a message, so
+    both switches exist to give them a text-only path to image-to-image.
+    """
+
+    context_handle_prompt_enabled: bool = DEFAULT_CONTEXT_HANDLE_PROMPT_ENABLED
+    auto_context_reference_enabled: bool = DEFAULT_AUTO_CONTEXT_REFERENCE_ENABLED
+
+
+@dataclass
 class PersonaTemplate:
     """Image generation persona template."""
 
@@ -142,6 +156,9 @@ class PluginConfig:
     message_interaction_settings: MessageInteractionSettings = field(
         default_factory=MessageInteractionSettings
     )
+    llm_tool_reference_settings: LLMToolReferenceSettings = field(
+        default_factory=LLMToolReferenceSettings
+    )
     presets: dict[str, Any] = field(default_factory=dict)
     personas: dict[str, PersonaTemplate] = field(default_factory=dict)
     enabled_llm_tools: set[str] = field(default_factory=lambda: set(ALL_LLM_TOOLS))
@@ -150,6 +167,7 @@ class PluginConfig:
 __all__ = (
     "GenerationSettings",
     "ImageAuditSettings",
+    "LLMToolReferenceSettings",
     "MessageInteractionSettings",
     "PersonaTemplate",
     "PluginConfig",

@@ -635,6 +635,18 @@
         "hint": "QQ emoji ids added while generation is in progress. Multiple ids are supported. See the OneBot/NapCat emoji reference. Default is 66 (heart); turn off the toggle above to disable reactions."
       }
     },
+    "llm_tool_reference": {
+      "description": "LLM tool reference images",
+      "hint": "Control how the LLM generation tool gets hold of the images in the current message. Text-only (non-multimodal) models cannot see message images and can only do image-to-image through the handle mechanism configured here.",
+      "context_handle_prompt_enabled": {
+        "description": "Inject image handles",
+        "hint": "When enabled, a plain-text handle list (message:1, reply:1, avatar:<id>) is appended to the LLM system prompt whenever the message carries images, quoted images, or mentions. The images themselves never enter the model context; the model only echoes a handle back through generate_image's reference_images/avatar_references, so text-only models can do image-to-image too."
+      },
+      "auto_context_reference_enabled": {
+        "description": "Auto-reference when unspecified",
+        "hint": "When enabled and the LLM calls the generation tool without any reference image, avatar, or persona argument, images in the current message, quoted message, and mentioned users' avatars are used as reference images. When disabled, the model must specify handles explicitly."
+      }
+    },
     "prompt_templates": {
       "description": "Prompt templates",
       "hint": "Centrally configure preset prompts and persona templates. View them with /预设 and use them by name with /生图.",

@@ -10,6 +10,7 @@ from astrbot.api import logger
 
 from ..shared.logging import log_prefix, mask_sensitive, safe_log_text, safe_log_url
 from ..shared.types import ImageCapability, ImageData
+from .context_images import resolve_context_references
 
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
@@ -50,18 +51,25 @@ def normalize_string_items(raw: Any) -> list[str]:
 
 
 def resolve_avatar_user_id(event: Any, ref: str) -> str | None:
-    """Resolve an avatar reference into a platform user id."""
+    """Resolve an avatar reference into a platform user id.
+
+    Accepts ``self``, ``sender``, a bare user id, and the ``avatar:``/``qq:``/
+    ``@`` prefixed forms the LLM may echo back from an injected handle list.
+    """
     normalized = ref.strip().lower()
+    for prefix in ("avatar:", "qq:", "@"):
+        normalized = normalized.removeprefix(prefix).strip()
     if not normalized:
         return None
-    if normalized == "self" and hasattr(event, "get_self_id"):
-        return str(event.get_self_id())
-    if normalized == "sender" and hasattr(event, "get_sender_id"):
-        return str(event.get_sender_id() or event.unified_msg_origin)
 
-    cleaned = normalized.removeprefix("qq:").removeprefix("@").strip()
-    if cleaned.isdigit():
-        return cleaned
+    if normalized == "self" and hasattr(event, "get_self_id"):
+        # An empty id would build a request for a nonexistent avatar.
+        return str(event.get_self_id() or "") or None
+    if normalized == "sender" and hasattr(event, "get_sender_id"):
+        return str(event.get_sender_id() or "") or None
+
+    if normalized.isdigit():
+        return normalized
     return None
 
 
@@ -177,13 +185,29 @@ async def collect_tool_reference_images(
     avatar_references: Any = None,
     persona_images: list[tuple[str, str]] | None = None,
     task_id: str | None = None,
+    auto_context_reference: bool = True,
 ) -> list[ImageData]:
-    """Collect LLM tool persona, URL/path, and avatar reference images."""
+    """Collect LLM tool persona, handle, URL/path, and avatar reference images.
+
+    ``reference_images`` may contain context handles (``message:1``, ``reply:1``,
+    ``avatar:10001``) resolved against the triggering message. This is the only
+    way a chat model without image input can request image-to-image generation,
+    since it never receives the message images themselves.
+
+    When ``auto_context_reference`` is set and the model asked for no reference
+    at all, images found in the message are used as a fallback.
+    """
     task_log = log_prefix("LLMTool", task_id) if task_id else LOG
     if not (capabilities & ImageCapability.IMAGE_TO_IMAGE):
         if reference_images or avatar_references or persona_images:
             logger.warning(f"{task_log} 当前适配器不支持参考图，已忽略工具参考图参数")
         return []
+
+    raw_references = normalize_string_items(reference_images)
+    raw_avatar_references = normalize_string_items(avatar_references)
+    has_explicit_request = bool(
+        raw_references or raw_avatar_references or persona_images
+    )
 
     images_data: list[ImageData] = []
     avatar_user_ids: set[str] = set()
@@ -202,18 +226,30 @@ async def collect_tool_reference_images(
             )
         )
 
-    images_data.extend(
-        await download_reference_images(
-            image_processor,
-            reference_images,
-            reference_label="显式",
-            task_id=task_id,
-            log_context="LLMTool",
-            workspace_dir=workspace_dir,
+    index = image_processor.scan_event_image_sources(event)
+    resolved = resolve_context_references(index, raw_references)
+    if resolved.unresolved:
+        logger.warning(
+            f"{task_log} 无法解析的图片句柄: "
+            f"{safe_log_text('、'.join(resolved.unresolved))}"
         )
-    )
 
-    for ref in normalize_string_items(avatar_references):
+    for references, label in (
+        (resolved.urls, "句柄"),
+        (resolved.plain_refs, "显式"),
+    ):
+        images_data.extend(
+            await download_reference_images(
+                image_processor,
+                references,
+                reference_label=label,
+                task_id=task_id,
+                log_context="LLMTool",
+                workspace_dir=workspace_dir,
+            )
+        )
+
+    for ref in (*raw_avatar_references, *resolved.avatar_refs):
         user_id = resolve_avatar_user_id(event, ref)
         if not user_id or user_id in avatar_user_ids:
             continue
@@ -222,6 +258,19 @@ async def collect_tool_reference_images(
             images_data.append(ImageData(data=avatar_data, mime_type="image/jpeg"))
             logger.debug(
                 f"{task_log} 已添加 {mask_sensitive(user_id)} 的头像作为参考图"
+            )
+
+    if auto_context_reference and not has_explicit_request and not index.is_empty:
+        # A text-only model may simply not mention the picture it cannot see.
+        if auto_images := await image_processor.fetch_indexed_images(
+            event,
+            index,
+            avatar_user_ids=avatar_user_ids,
+        ):
+            images_data.extend(auto_images)
+            logger.debug(
+                f"{task_log} 工具未指定参考图，已自动引用消息中的 "
+                f"{len(auto_images)} 张图片"
             )
 
     return deduplicate_reference_images(
